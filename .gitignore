@@ -1,0 +1,35 @@
+# Local secrets and private documentation
+/.secrets/
+/.exclude/
+.env
+.env.*
+!.env.example
+
+# .NET build and test outputs
+**/bin/
+**/obj/
+**/TestResults/
+*.trx
+
+# Frontend dependencies and generated outputs
+node_modules/
+dist/
+dist-ssr/
+coverage/
+playwright-report/
+test-results/
+
+# Application logs
+logs/
+*.log
+*.jsonl
+
+# Local editor and operating system files
+.vs/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+*.local
+.DS_Store
+Thumbs.db
