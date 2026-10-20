@@ -1,0 +1,23 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { api } from '../api'
+interface AuditEntry { id: number; occurredAt: string; event: string; severity: string; actorId: string | null; targetId: string | null; remoteIp: string | null; traceId: string; method: string; route: string; statusCode: number; elapsedMs: number }
+interface Summary { windowMinutes: number; counts: Record<string, number>; alerts: { eventName: string; remoteIp: string; count: number; threshold: number }[]; failedEmails: number; loggingHealthy: boolean }
+const entries = ref<AuditEntry[]>([]), summary = ref<Summary | null>(null), loading = ref(false), error = ref('')
+const page = ref(1), eventName = ref(''), hours = ref(24), updated = ref('')
+let revision = 0
+async function load() {
+  const current = ++revision
+  loading.value = true; error.value = ''
+  try {
+    const query = new URLSearchParams({ page: String(page.value), pageSize: '50', hours: String(hours.value), eventName: eventName.value.trim() })
+    const [events, overview] = await Promise.all([api<AuditEntry[]>(`/monitoring/events?${query}`), api<Summary>('/monitoring/summary')])
+    if (current === revision) { entries.value = events; summary.value = overview; updated.value = new Date().toLocaleTimeString() }
+  } catch (e) { if (current === revision) error.value = (e as Error).message }
+  finally { if (current === revision) loading.value = false }
+}
+function filter() { page.value = 1; void load() }
+function move(step: number) { page.value += step; void load() }
+onMounted(load)
+</script>
+<template><section class="section"><div class="section-heading"><div><p class="eyebrow">ADMIN WORKSPACE</p><h1>Security & logs<span class="accent">.</span></h1></div><button class="button secondary" :disabled="loading" @click="load">Refresh</button></div><p class="muted">Security audit trail and activity signals. Summary covers the last 15 minutes.{{ updated ? ` Last updated ${updated}.` : '' }}</p><p v-if="error" class="error" role="alert">{{ error }}</p><p v-if="loading" role="status">Loading monitoring data…</p><template v-if="summary && !error"><p v-if="!summary.loggingHealthy" class="error" role="alert">Logging storage reported a failure. Inspect server storage permissions, available disk space and database access.</p><p v-if="summary.failedEmails" class="error" role="alert">{{ summary.failedEmails }} email deliveries are exhausted or expired. Investigate SMTP and pending email records.</p><div v-if="summary.alerts.length" class="notice"><h2>Activity requiring review</h2><ul><li v-for="alert in summary.alerts" :key="`${alert.eventName}-${alert.remoteIp}`">{{ alert.eventName }}: {{ alert.count }} events from {{ alert.remoteIp }} (threshold {{ alert.threshold }}).</li></ul></div><p v-else class="success">No activity thresholds exceeded in the last 15 minutes.</p><div class="panel"><h2>Event counts · last 15 minutes</h2><p v-if="!Object.keys(summary.counts).length">No recorded events yet.</p><div class="actions" style="flex-wrap:wrap"><span v-for="(count, name) in summary.counts" :key="name" class="badge">{{ name }}: {{ count }}</span></div></div></template><form class="toolbar" @submit.prevent="filter"><label>Event name (exact)<input v-model="eventName" maxlength="80" placeholder="e.g. LoginFailed"></label><label>History<select v-model.number="hours"><option :value="1">Last hour</option><option :value="24">Last 24 hours</option><option :value="168">Last 7 days</option></select></label><button class="button secondary" :disabled="loading">Apply filters</button></form><div v-if="!error" class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Request</th><th>Identity</th><th>Trace</th></tr></thead><tbody><tr v-for="entry in entries" :key="entry.id"><td>{{ new Date(entry.occurredAt).toLocaleString() }}<small>{{ entry.severity }}</small></td><td>{{ entry.event }}<small>HTTP {{ entry.statusCode }} · {{ entry.elapsedMs.toFixed(1) }} ms</small></td><td>{{ entry.method }} {{ entry.route }}</td><td>{{ entry.remoteIp ?? 'Unknown IP' }}<small>Actor: {{ entry.actorId ?? 'Anonymous' }}</small><small v-if="entry.targetId">Target: {{ entry.targetId }}</small></td><td><code>{{ entry.traceId }}</code></td></tr></tbody></table><p v-if="!entries.length && !loading" class="empty">No events match these filters.</p></div><div class="pagination"><button class="button secondary small" :disabled="loading || page === 1" @click="move(-1)">← Previous</button><span>Page {{ page }}</span><button class="button secondary small" :disabled="loading || entries.length < 50" @click="move(1)">Next →</button></div></section></template>
