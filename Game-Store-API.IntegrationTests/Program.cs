@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
-var directory = Path.GetFullPath(args.FirstOrDefault() ?? "../Game-Store-API");
+var directory = Path.GetFullPath(args.FirstOrDefault() ?? Path.Combine(AppContext.BaseDirectory, "../../../../Game-Store-API"));
 var adminString = Environment.GetEnvironmentVariable("AUTH_TEST_ADMIN_CONNECTION") ?? "Host=localhost;Database=game_store;Username=game_store;Password=game_store_dev";
 await using var admin = NpgsqlDataSource.Create(adminString);
 var database = "auth_test_" + Guid.NewGuid().ToString("N");
@@ -51,6 +51,11 @@ async Task RunAsync()
     Check(await recovery.RedeemAsync(email, current, null, ct), "verification");
     Check(!await recovery.RedeemAsync(email, current, null, ct), "verification single use");
     var oldToken = await auth.LoginAsync(email, password, ct); Check(oldToken is not null, "verified login");
+    for (var attempt = 0; attempt < 5; attempt++)
+        Check(await auth.LoginAsync(email, "Incorrect password!", ct) is null, "incorrect password rejected");
+    Check(await auth.LoginAsync(email, password, ct) is null, "locked account rejects correct password");
+    await Execute("UPDATE users SET locked_until = now() - interval '1 second'");
+    Check(await auth.LoginAsync(email, password, ct) is not null, "login recovers after lockout expiry");
     await recovery.RequestCodeAsync("MISSING@EXAMPLE.COM", true, ct);
     await recovery.RequestCodeAsync(email, true, ct);
     var reset = await Code("reset");
@@ -106,16 +111,19 @@ async Task RunAsync()
     try
     {
         using var client = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
-            { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(3) };
+            { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(10) };
         var ready = false;
         for (var i = 0; i < 100; i++)
         {
             if (process.HasExited) throw new Exception("API process exited during startup.");
-            try { ready = (await client.GetAsync("/health/db")).IsSuccessStatusCode; } catch (HttpRequestException) { }
+            try { ready = (await client.GetAsync("/health/db")).IsSuccessStatusCode; }
+            catch (HttpRequestException) { }
+            catch (TaskCanceledException) { }
             if (ready) break;
             await Task.Delay(100);
         }
         Check(ready, "API startup");
+        await TokenValidationChecks.RunAsync(client, jwt, newToken!.AccessToken);
         client.DefaultRequestHeaders.Authorization = new("Bearer", oldToken!.AccessToken);
         Check((await client.GetAsync("/api/auth/me")).StatusCode == System.Net.HttpStatusCode.Unauthorized, "old JWT revoked");
         client.DefaultRequestHeaders.Authorization = new("Bearer", newToken!.AccessToken);

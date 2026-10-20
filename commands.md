@@ -177,10 +177,22 @@ Backend integration checks require the database to be running. They create and
 remove an isolated test database and capture email without sending real mail.
 This is a console test runner, so use `dotnet run`, not `dotnet test`.
 Stop the API first if Windows reports locked build files.
+Alternatively, use `-c Release` to build and run checks separately from a running
+Debug API. Backend checks are in `Game-Store-API.IntegrationTests`; browser checks
+are in `Game-Store-Web/tests/browser` and mock the API rather than testing a live backend.
 
 ```sh
-dotnet run --project ./Game-Store-API.AuthTests -- ./Game-Store-API
+dotnet run --project ./Game-Store-API.IntegrationTests -- ./Game-Store-API
 ```
+
+For detailed build output while running backend checks in Release:
+
+```sh
+dotnet run --project ./Game-Store-API.IntegrationTests -c Release --verbosity detailed -- ./Game-Store-API
+```
+
+`--verbosity detailed` controls build output; the console test runner still prints
+its existing PASS/failure messages.
 
 Browser tests use mocked API responses and a separate Vite server on port 5174.
 Run from the frontend directory so Playwright finds its configuration:
@@ -189,6 +201,8 @@ Run from the frontend directory so Playwright finds its configuration:
 cd Game-Store-Web
 npx playwright install chromium
 npm test
+# List individual test results and record traces for every test:
+npx playwright test --reporter=list --trace=on
 # Optional interactive test UI / report:
 npx playwright test --ui
 npx playwright show-report
