@@ -10,14 +10,25 @@ import TeamView from './views/TeamView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import CartView from './views/CartView.vue'
 import MonitoringView from './views/MonitoringView.vue'
+import CheckoutView from './views/CheckoutView.vue'
+import OrdersView from './views/OrdersView.vue'
+import AccountView from './views/AccountView.vue'
+import ManagementView from './views/ManagementView.vue'
 
 export const navigationFailure = ref<{ path: string; message: string } | null>(null)
 export const router = createRouter({ history: createWebHistory(), scrollBehavior: () => ({ top: 0 }), routes: [
   { path: '/', component: CatalogView },
   { path: '/products/:id', component: ProductView },
   { path: '/cart', component: CartView, meta: { authenticated: true } },
+  { path: '/checkout', component: CheckoutView, meta: { authenticated: true } },
+  { path: '/orders', component: OrdersView, meta: { authenticated: true } },
+  { path: '/orders/:id', component: OrdersView, meta: { authenticated: true } },
+  { path: '/account', component: AccountView, meta: { authenticated: true } },
   ...['login', 'signup', 'verify', 'forgot-password', 'reset-password'].map(mode => ({ path: `/${mode}`, component: AuthView, props: { mode } })),
   { path: '/staff/products', component: InventoryView, meta: { staff: true } },
+  { path: '/staff', component: ManagementView, meta: { staff: true } },
+  { path: '/staff/orders', component: OrdersView, props: { staff: true }, meta: { staff: true } },
+  { path: '/staff/orders/:id', component: OrdersView, props: { staff: true }, meta: { staff: true } },
   { path: '/staff/team', component: TeamView, meta: { admin: true } },
   { path: '/staff/monitoring', component: MonitoringView, meta: { admin: true } },
   { path: '/:pathMatch(.*)*', component: NotFoundView },

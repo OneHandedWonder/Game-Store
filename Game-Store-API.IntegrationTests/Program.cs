@@ -18,7 +18,7 @@ async Task RunAsync()
 {
     await using var source = NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(adminString) { Database = database }.ConnectionString);
     async Task Execute(string sql) { await using var cmd = source.CreateCommand(sql); await cmd.ExecuteNonQueryAsync(); }
-    foreach (var file in new[] { "001_users.sql", "002_account_recovery.sql", "003_roles.sql", "004_products.sql", "005_product_versions.sql", "006_cart.sql", "007_audit_events.sql" }) await Execute(await File.ReadAllTextAsync(Path.Combine(directory, "Data", file)));
+    foreach (var file in new[] { "001_users.sql", "002_account_recovery.sql", "003_roles.sql", "004_products.sql", "005_product_versions.sql", "006_cart.sql", "007_audit_events.sql", "008_orders.sql", "009_order_confirmation_email.sql", "010_order_fulfillment.sql", "011_order_addresses.sql" }) await Execute(await File.ReadAllTextAsync(Path.Combine(directory, "Data", file)));
     var protection = new EphemeralDataProtectionProvider();
     var protector = protection.CreateProtector("GameStore.AccountEmail.v1");
     var jwt = new JwtSettings { Issuer = "Tests", Audience = "Tests", SigningKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) };
@@ -93,6 +93,7 @@ async Task RunAsync()
     for (var i = 0; i < 100 && sender.Count == 0; i++) await Task.Delay(50);
     await worker.StopAsync(ct); Check(sender.Count == 1, "outbox delivery");
     await Execute("DELETE FROM email_outbox");
+    await OrderConfirmationChecks.RunAsync(source, protection);
     var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
     listener.Start(); var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
     var start = new System.Diagnostics.ProcessStartInfo("dotnet") { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -165,6 +166,7 @@ async Task RunAsync()
         await CatalogChecks.RunAsync(client, newToken.AccessToken, catalogEmployeeToken!.AccessToken, adminToken!.AccessToken);
         await CartChecks.RunAsync(client, newToken.AccessToken, adminToken!.AccessToken);
         await LoggingChecks.RunAsync(client, source, newToken.AccessToken, catalogEmployeeToken!.AccessToken, adminToken.AccessToken, logDirectory);
+        await OrderChecks.RunAsync(client, source, newToken.AccessToken, adminToken.AccessToken, catalogEmployeeToken.AccessToken, logDirectory);
         client.DefaultRequestHeaders.Authorization = new("Bearer", adminToken!.AccessToken);
         Check((await AddStaff(initialPassword: "short!")).StatusCode == System.Net.HttpStatusCode.BadRequest, "staff password policy");
         Check((await AddStaff(address: "not-an-email")).StatusCode == System.Net.HttpStatusCode.BadRequest, "staff email validation");
@@ -215,6 +217,7 @@ async Task RunAsync()
         using var doc = JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json"));
         foreach (var path in new[] { "verify-email", "resend-verification", "forgot-password", "reset-password" })
             Check(doc.RootElement.GetProperty("paths").TryGetProperty("/api/auth/" + path, out _), "Swagger recovery endpoint");
+        await PasswordChangeChecks.RunAsync(client, source, auth, recovery, email, replacement);
     }
     finally
     {

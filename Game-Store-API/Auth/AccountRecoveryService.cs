@@ -80,7 +80,7 @@ public sealed class AccountRecoveryService(
         await using var queue = new NpgsqlCommand("""
             INSERT INTO email_outbox (id, user_id, purpose, protected_message, expires_at)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (user_id, purpose) DO UPDATE SET
+            ON CONFLICT (user_id, purpose) WHERE purpose IN ('verify', 'reset') DO UPDATE SET
                 id = EXCLUDED.id, protected_message = EXCLUDED.protected_message,
                 expires_at = EXCLUDED.expires_at, attempts = 0, next_attempt_at = now()
             """, connection, transaction);

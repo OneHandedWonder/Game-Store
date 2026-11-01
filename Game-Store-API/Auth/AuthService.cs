@@ -96,6 +96,51 @@ public sealed class AuthService
         return new TokenResponse(new JwtSecurityTokenHandler().WriteToken(token), "Bearer", expires);
     }
 
+    public async Task<bool> ChangePasswordAsync(Guid userId, Guid securityVersion, string currentPassword, string newPassword, CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var query = new NpgsqlCommand("""
+            SELECT email, password_hash, locked_until > now() FROM users
+            WHERE id = $1 AND security_version = $2 FOR UPDATE
+            """, connection, transaction);
+        query.Parameters.AddWithValue(userId);
+        query.Parameters.AddWithValue(securityVersion);
+        string email, hash;
+        await using (var reader = await query.ExecuteReaderAsync(cancellationToken))
+        {
+            if (!await reader.ReadAsync(cancellationToken) || (!reader.IsDBNull(2) && reader.GetBoolean(2))) return false;
+            email = reader.GetString(0);
+            hash = reader.GetString(1);
+        }
+        if (hasher.VerifyHashedPassword(email, hash, currentPassword) == PasswordVerificationResult.Failed)
+        {
+            await using var failure = new NpgsqlCommand("""
+                UPDATE users SET failed_attempts = CASE WHEN failed_attempts + 1 >= 5 THEN 0 ELSE failed_attempts + 1 END,
+                locked_until = CASE WHEN failed_attempts + 1 >= 5 THEN now() + interval '15 minutes' ELSE NULL END WHERE id = $1
+                """, connection, transaction);
+            failure.Parameters.AddWithValue(userId);
+            await failure.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return false;
+        }
+        if (hasher.VerifyHashedPassword(email, hash, newPassword) != PasswordVerificationResult.Failed) return false;
+        await using var update = new NpgsqlCommand("""
+            UPDATE users SET password_hash = $2, security_version = gen_random_uuid(), failed_attempts = 0, locked_until = NULL WHERE id = $1
+            """, connection, transaction);
+        update.Parameters.AddWithValue(userId);
+        update.Parameters.AddWithValue(hasher.HashPassword(email, newPassword));
+        await update.ExecuteNonQueryAsync(cancellationToken);
+        foreach (var sql in new[] { "DELETE FROM account_tokens WHERE user_id = $1 AND purpose = 'reset'", "DELETE FROM email_outbox WHERE user_id = $1 AND purpose = 'reset'" })
+        {
+            await using var revoke = new NpgsqlCommand(sql, connection, transaction);
+            revoke.Parameters.AddWithValue(userId);
+            await revoke.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<bool> SetRoleAsync(Guid userId, string role, CancellationToken cancellationToken)
     {
         if (!AppRoles.IsValid(role)) throw new ArgumentException("Invalid role.", nameof(role));

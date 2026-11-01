@@ -21,7 +21,7 @@ async function submit() {
     if (props.mode === 'login') {
       await auth.login(email.value.trim(), password.value); password.value = ''
       const redirect = route.query.redirect
-      await router.push(typeof redirect === 'string' && /^\/(cart|products\/[a-fA-F0-9-]+)$/.test(redirect)
+      await router.push(typeof redirect === 'string' && /^\/(cart|checkout|account|orders(?:\/[a-fA-F0-9-]+)?|products\/[a-fA-F0-9-]+)$/.test(redirect)
         ? redirect : auth.isStaff ? '/staff/products' : '/')
       return
     }

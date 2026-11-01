@@ -1,0 +1,10 @@
+BEGIN;
+ALTER TABLE email_outbox ADD COLUMN IF NOT EXISTS order_id uuid REFERENCES orders(id);
+ALTER TABLE email_outbox DROP CONSTRAINT IF EXISTS email_outbox_purpose_check;
+ALTER TABLE email_outbox ADD CONSTRAINT email_outbox_purpose_check CHECK (purpose IN ('verify', 'reset', 'order'));
+ALTER TABLE email_outbox DROP CONSTRAINT IF EXISTS email_outbox_user_id_purpose_key;
+CREATE UNIQUE INDEX IF NOT EXISTS email_outbox_account_purpose ON email_outbox(user_id, purpose) WHERE purpose IN ('verify', 'reset');
+CREATE UNIQUE INDEX IF NOT EXISTS email_outbox_order ON email_outbox(order_id);
+ALTER TABLE email_outbox DROP CONSTRAINT IF EXISTS email_outbox_order_purpose_check;
+ALTER TABLE email_outbox ADD CONSTRAINT email_outbox_order_purpose_check CHECK ((purpose = 'order') = (order_id IS NOT NULL));
+COMMIT;

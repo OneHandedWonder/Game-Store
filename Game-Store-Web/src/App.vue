@@ -22,15 +22,19 @@ function logout() { auth.clear('You have signed out on this device.'); void rout
     <nav aria-label="Main navigation">
       <RouterLink to="/">The collection</RouterLink>
       <RouterLink to="/cart">Cart<span v-if="cart.cart && !cart.error"> ({{ cart.count }})</span><span v-if="cart.error" class="sr-only"> — unavailable; open to retry</span></RouterLink>
-      <RouterLink v-if="auth.isStaff" to="/staff/products">Inventory</RouterLink>
-      <RouterLink v-if="auth.isAdmin" to="/staff/team">Team</RouterLink>
-      <RouterLink v-if="auth.isAdmin" to="/staff/monitoring">Monitoring</RouterLink>
+      <RouterLink v-if="auth.user" to="/orders">Orders</RouterLink>
+      <RouterLink v-if="auth.user" to="/account">Account</RouterLink>
+      <RouterLink v-if="auth.isStaff" class="button secondary small" to="/staff">Management</RouterLink>
     </nav>
     <div class="account-nav"><span v-if="auth.user" class="badge">{{ auth.user.role }}</span>
       <button v-if="auth.user" class="button secondary small" @click="logout">Sign out</button>
       <RouterLink v-else class="button secondary small" to="/login">Sign in <span aria-hidden="true">↗</span></RouterLink>
     </div>
   </header>
+  <nav v-if="auth.isStaff && (route.meta.staff || route.meta.admin)" class="management-nav" aria-label="Management navigation">
+    <RouterLink to="/staff">Overview</RouterLink><RouterLink to="/staff/orders">Orders</RouterLink><RouterLink to="/staff/products">Inventory</RouterLink>
+    <RouterLink v-if="auth.isAdmin" to="/staff/team">Team</RouterLink><RouterLink v-if="auth.isAdmin" to="/staff/monitoring">Monitoring</RouterLink>
+  </nav>
   <main id="main"><div v-if="navigationFailure" class="error" role="alert">{{ navigationFailure.message }} <button class="text-button" @click="router.push(navigationFailure.path)">Retry navigation</button></div><div v-if="auth.notice" class="notice" role="status">{{ auth.notice }} <button class="text-button" @click="auth.notice = ''">Dismiss</button></div><RouterView /></main>
   <footer><RouterLink to="/" class="footer-brand">gamestore.</RouterLink><p>Find your next favourite.</p><span>Games. Gear. Good times.</span></footer>
 </template>

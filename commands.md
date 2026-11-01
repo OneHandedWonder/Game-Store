@@ -285,3 +285,128 @@ npm --prefix ./Game-Store-Web run preview
 ```
 
 Preview does not proxy `/api`; use the development server for local API-backed use.
+
+## Dummy checkout and account features
+
+Apply `Data/008_orders.sql` using the migration procedure above before using
+checkout or order history on an existing database. Restart the API after rebuilding.
+
+- `/checkout`: authenticated demo checkout, reached from the cart. Nothing is
+  charged or shipped. Only these test card numbers are accepted:
+  `4242 4242 4242 4242` succeeds; `4000 0000 0000 0002` simulates a decline.
+  Use a fictional cardholder name, an unexpired month/year (at most 20 years ahead),
+  and a made-up 3–4 digit security code. Never enter real card details.
+- `/orders`: private, paginated order history with saved product names, quantities,
+  prices and DKK totals. Deleting or editing products does not change past orders.
+- `/account`: change password with current-password verification. A successful
+  change revokes all JWT sessions and pending password reset codes.
+
+The API validates card syntax, Luhn checksum, test-card allowlist, expiry and
+security-code format. Card details are used transiently for simulation and are
+excluded from database storage and application logs. This is not a real payment
+provider integration or proof that a card/account exists or has funds.
+
+Checkout locks cart writes and product rows, validates the reviewed cart against
+current server prices/stock, then saves the order, deducts stock and clears the
+cart in one transaction. The per-account checkout key makes retries return the
+same order without another stock deduction. Price/cart conflicts require a new
+review; declines preserve the cart. Carts support up to 100 distinct products.
+Checkout and password changes have separate per-account rate limits of 20 and 10
+requests per minute respectively. Existing current-password lockout rules also
+apply to password changes.
+
+See `user-stories.md` for the implementation and validation map.
+
+### Order confirmation emails
+
+For an existing database, apply `Data/009_order_confirmation_email.sql` using the
+migration procedure above and restart the API with the new build. This migration
+also updates the account-email uniqueness index; the matching API code is required
+for registration and recovery email requests after migration.
+
+Each new checkout queues an encrypted confirmation for the signed-in account's
+email address in the same transaction as the order. It includes the order ID,
+saved items, quantities, DKK prices/total, and the simulated-payment/no-shipping
+notice. No card details or reset codes are included. Checkout retries do not queue
+another message, and separate orders can each have a pending confirmation.
+
+The existing outbox worker sends confirmations through the configured SMTP account.
+Delivery failures retain the message and retry after one minute, up to five attempts;
+confirmation messages expire after seven days. Check application logs for delivery
+failures. The order remains saved if SMTP delivery fails. SMTP delivery is at least
+once: an SMTP acceptance followed by a lost acknowledgement or database failure
+can cause a duplicate email on retry.
+
+Integration checks capture confirmation emails without sending real mail and cover
+encryption, recipient selection, contents, duplicate submissions, multiple pending
+orders, transaction rollback and delivery retry behavior.
+
+### Staff orders
+
+Admins and employees can open **Management** (`/staff`) and then **Staff orders** (`/staff/orders`) to browse all
+customer orders, 20 per page, and view saved items, quantities, DKK totals, dates,
+customer email addresses and simulated-payment status. The API at
+`/api/staff/orders` and `/api/staff/orders/{id}` enforces staff roles and disables
+response caching. Customer `/orders` routes remain restricted to the order owner.
+
+### Management dashboard and fulfillment
+
+Apply `Data/010_order_fulfillment.sql` and restart the rebuilt API. Existing and new
+orders start as `unfulfilled`. The staff-only Management button opens `/staff`,
+with database metrics for total/fulfilled/unfulfilled orders, simulated sales,
+average order value, orders today (Europe/Copenhagen), distinct ordering customers,
+units ordered, active products, and active products with five or fewer units left.
+Figures are all-time unless labeled otherwise; use Refresh metrics for current data.
+
+Staff can mark orders fulfilled or unfulfilled on the order-details page. Updates
+require the loaded fulfillment version; stale updates return a conflict and require
+reloading. Fulfillment is a demo workflow and does not ship goods, charge money,
+change stock, or send additional confirmation emails. Inventory and order links
+are in the management navigation; team and monitoring remain admin-only.
+
+### Dashboard charts and order addresses
+
+Apply `Data/011_order_addresses.sql` before restarting the rebuilt API. Checkout
+now requires a recipient, street address, postal code, city, and two-letter country
+code, with an optional second address line. Use fictional addresses in this demo.
+Fields have server-side length/format validation; this does not verify deliverability.
+The address is an immutable order snapshot encrypted with ASP.NET Data Protection,
+and is returned only with owner/staff order details. It is excluded from lists,
+analytics, confirmation emails and application logs, and is not saved in browser
+storage. Older orders have no address and display that explicitly. Preserve the
+API's Data Protection keys across deployments to keep addresses decryptable.
+
+Management includes daily simulated-sales and order charts, a fulfillment ring,
+and the five most-ordered products. Choose a 7/30/90-day period for charts and top
+products. Daily totals use Europe/Copenhagen dates, include zero-order days, and
+are calculated from saved orders. The fulfillment ring and metric cards remain
+all-time. Graph points support keyboard focus and daily tables provide the data
+as text. Empty periods display zero totals without fabricated activity.
+
+## Frontend security headers
+
+Vite development and preview responses send CSP `frame-ancestors 'none'` and
+`X-Frame-Options: DENY`, preventing the SPA from being embedded. They also send
+`nosniff`, a no-referrer policy and restrictive browser feature permissions.
+Restart the development server after changing its configuration.
+
+The production CSP allows same-origin scripts, API requests and workers, the
+existing Google Fonts stylesheet/font hosts, and HTTP(S) product images. Inline
+scripts, eval, embedded frames, plugins and foreign form destinations are blocked.
+Inline style attributes remain allowed for Vue's chart and password-meter styles.
+Development additionally permits injected styles and localhost HMR WebSockets;
+these exceptions are absent from the compiled preview/production policy.
+
+Vite headers are not embedded in `dist/`. For production Nginx hosting, include
+`Game-Store-Web/deploy/nginx-security-headers.conf` in the HTTPS frontend server
+block. Repeat the include in any location that defines its own `add_header`, since
+those directives affect inheritance. Keep existing TLS, SPA fallback, API reverse
+proxy and static asset configuration. Validate with `nginx -t` before reloading.
+For other hosts, configure the equivalent response headers from `security-headers.ts`.
+Do not use a CSP meta tag for frame protection: `frame-ancestors` requires a header.
+
+Run `npm test` in the frontend for development browser checks and
+`npm run test:production` for compiled-app CSP checks. The latter verifies framing
+and inline-script blocking, password-worker rendering, and Nginx policy parity.
+Verify real deployed HTML responses separately, including deep links and errors;
+local preview tests do not prove an external host has applied these headers.

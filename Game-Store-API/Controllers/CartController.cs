@@ -42,6 +42,14 @@ public sealed class CartController(NpgsqlDataSource dataSource) : ControllerBase
         var quantity = request.Quantity!.Value;
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockCart(connection, transaction, cancellationToken);
+        await using (var capacity = new NpgsqlCommand("SELECT count(*) >= 100 AND NOT EXISTS (SELECT 1 FROM cart_items WHERE user_id = $1 AND product_id = $2) FROM cart_items WHERE user_id = $1", connection, transaction))
+        {
+            capacity.Parameters.AddWithValue(UserId);
+            capacity.Parameters.AddWithValue(productId);
+            if (await capacity.ExecuteScalarAsync(cancellationToken) is true)
+                return Conflict(new { message = "Your cart can contain at most 100 different products." });
+        }
         await using var product = new NpgsqlCommand("SELECT stock, is_active FROM products WHERE id = $1 FOR SHARE", connection, transaction);
         product.Parameters.AddWithValue(productId);
         await using (var reader = await product.ExecuteReaderAsync(cancellationToken))
@@ -65,19 +73,35 @@ public sealed class CartController(NpgsqlDataSource dataSource) : ControllerBase
     [HttpDelete("items/{productId:guid}")]
     public async Task<IActionResult> Remove(Guid productId, CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand("DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockCart(connection, transaction, cancellationToken);
+        await using var command = new NpgsqlCommand("DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2", connection, transaction);
         command.Parameters.AddWithValue(UserId);
         command.Parameters.AddWithValue(productId);
-        return await command.ExecuteNonQueryAsync(cancellationToken) == 1 ? NoContent() : NotFound();
+        var removed = await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+        await transaction.CommitAsync(cancellationToken);
+        return removed ? NoContent() : NotFound();
     }
 
     [HttpDelete]
     public async Task<IActionResult> Clear(CancellationToken cancellationToken)
     {
-        await using var command = dataSource.CreateCommand("DELETE FROM cart_items WHERE user_id = $1");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockCart(connection, transaction, cancellationToken);
+        await using var command = new NpgsqlCommand("DELETE FROM cart_items WHERE user_id = $1", connection, transaction);
         command.Parameters.AddWithValue(UserId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return NoContent();
+    }
+
+    private async Task LockCart(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("SELECT id FROM users WHERE id = $1 FOR UPDATE", connection, transaction);
+        command.Parameters.AddWithValue(UserId);
+        await command.ExecuteScalarAsync(cancellationToken);
     }
 }
 

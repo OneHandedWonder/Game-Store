@@ -71,6 +71,8 @@ public sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<Reque
             "api/auth/resend-verification" => "VerificationRequested",
             "api/auth/forgot-password" => "PasswordResetRequested",
             "api/auth/reset-password" => "PasswordReset",
+            "api/auth/change-password" => "PasswordChange",
+            "api/orders/checkout" => "Checkout",
             _ when route.StartsWith("api/products", StringComparison.Ordinal) => "ProductChange",
             _ when route.StartsWith("api/cart", StringComparison.Ordinal) => "CartChange",
             _ => "ApiWrite"

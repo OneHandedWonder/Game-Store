@@ -36,6 +36,17 @@ public sealed class AuthController(AuthService auth, AccountRecoveryService reco
     [HttpGet("me")]
     public IActionResult Me() => Ok(new { id = User.FindFirstValue("sub"), role = User.FindFirstValue("role") });
 
+    [Authorize]
+    [EnableRateLimiting("password-change")]
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        var changed = await auth.ChangePasswordAsync(Guid.Parse(User.FindFirstValue("sub")!),
+            Guid.Parse(User.FindFirstValue("security_version")!), request.CurrentPassword, request.NewPassword, cancellationToken);
+        return changed ? Ok(new { message = "Password changed. All sessions have been revoked. Sign in again." })
+            : BadRequest(new { message = "Password change failed. Check your current password, use a different new password, or try again after any account lock expires." });
+    }
+
     [Authorize(Roles = AppRoles.Admin)]
     [EnableRateLimiting("auth")]
     [HttpPost("users/staff")]
@@ -111,6 +122,12 @@ public sealed record RegisterRequest(
 public sealed record LoginRequest(
     [Required, EmailAddress, MaxLength(254)] string Email,
     [Required, StringLength(128)] string Password);
+
+public sealed record ChangePasswordRequest(
+    [Required, StringLength(128)] string CurrentPassword,
+    [Required, StringLength(128, MinimumLength = 10)]
+    [RegularExpression(@"[\s\S]*[^\p{L}\p{N}\s][\s\S]*", ErrorMessage = "Password must contain a special character.")]
+    string NewPassword);
 
 public sealed record EmailRequest([Required, EmailAddress, MaxLength(254)] string Email);
 
